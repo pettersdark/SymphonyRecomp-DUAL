@@ -125,4 +125,3 @@ The inherited workflows are manual-only in this repository. They depend on
 upstream-specific private disc-source credentials and are not configured as an
 automatic build or release service for this extension. Local builds use your
 own disc as described above.
-

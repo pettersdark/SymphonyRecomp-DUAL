@@ -1,0 +1,106 @@
+diff --git a/RecompOne.Runtime/Hardware/Controller.cs b/RecompOne.Runtime/Hardware/Controller.cs
+index dbe6c57..3f251e1 100644
+--- a/RecompOne.Runtime/Hardware/Controller.cs
++++ b/RecompOne.Runtime/Hardware/Controller.cs
+@@ -20,6 +20,9 @@ public static class Controller
+     public const ushort Square = 1 << 15;
+ 
+     public static ushort State = 0xFFFF;
++    // Short, game-thread driven menu navigation. Kept separate from touch holds.
++    public static volatile bool MenuOwnsInput;
++    public static volatile ushort MenuInput = 0xFFFF;
+     public static byte   RightX = 0x80;
+     public static byte   RightY = 0x80;
+     public static byte   LeftX = 0x80;
+diff --git a/RecompOne.Runtime/Host/InputManager.cs b/RecompOne.Runtime/Host/InputManager.cs
+index 2761af3..599517f 100644
+--- a/RecompOne.Runtime/Host/InputManager.cs
++++ b/RecompOne.Runtime/Host/InputManager.cs
+@@ -129,7 +129,8 @@ internal static unsafe class InputManager
+         var kb = _keyboard;
+         if (kb != null) s &= KeyState(kb, ConfigManager.Game.Keys);
+ 
+-        Controller.State = (ushort)(s & Controller.ConsumeExternalState());
++        ushort touch = Controller.ConsumeExternalState();
++        Controller.State = Controller.MenuOwnsInput ? Controller.MenuInput : (ushort)(s & touch);
+ 
+         // A real stick wins over the overlay's virtual one; when no pad is attached
+         // leave the axes alone so the on-screen joystick keeps working.
+diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
+index 2b549e4..fe76ec2 100644
+--- a/RecompOne.Runtime/Host/Window/HostWindow.cs
++++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
+@@ -483,6 +483,12 @@ public static class HostWindow
+     }
+ 
+     public static AspectRatioMode CurrentAspectRatio = AspectRatioMode.AutoDevice;
++    // Applied during final presentation, independently of the internal render scale.
++    public static volatile float ScanlineStrength;
++    public sealed record GameViewport(int X, int Y, int Width, int Height, int ScreenWidth, int ScreenHeight);
++    static GameViewport? _gameViewport;
++    public static GameViewport? CurrentGameViewport => System.Threading.Volatile.Read(ref _gameViewport);
++    public static event Action? GameViewportChanged;
+     public static volatile bool PendingGpuBackendReset = true;
+ 
+     public static void RequestGpuReset()
+@@ -492,6 +498,7 @@ public static class HostWindow
+ 
+     static uint _directVao, _directVbo, _directProg;
+     static int _uDirectTex;
++    static int _uDirectScanlineStrength, _uDirectScanlineRows;
+ 
+     static float _directUMax = 1.0f;
+ 
+@@ -528,15 +535,23 @@ public static class HostWindow
+                 precision highp int;
+                 in vec2 vUv;
+                 uniform sampler2D uTex;
++                uniform float uScanlineStrength;
++                uniform float uScanlineRows;
+                 out vec4 FragColor;
+                 void main() {
+-                    FragColor = texture(uTex, vUv);
++                    vec4 color = texture(uTex, vUv);
++                    float phase = fract(vUv.y * uScanlineRows);
++                    float line = 1.0 - smoothstep(0.15, 0.35, phase);
++                    color.rgb *= 1.0 - uScanlineStrength * line;
++                    FragColor = color;
+                 }
+                 """;
+             _directProg = Hle.GlShaders.Build(gl, vs, fs, "direct_present");
+             if (_directProg != 0)
+             {
+                 _uDirectTex = gl.GetUniformLocation(_directProg, "uTex");
++                _uDirectScanlineStrength = gl.GetUniformLocation(_directProg, "uScanlineStrength");
++                _uDirectScanlineRows = gl.GetUniformLocation(_directProg, "uScanlineRows");
+                 _directVao = gl.GenVertexArray();
+                 gl.BindVertexArray(_directVao);
+                 _directVbo = gl.GenBuffer();
+@@ -608,6 +623,15 @@ public static class HostWindow
+             vy = (screenH - vh) / 2;
+         }
+ 
++        var previousViewport = CurrentGameViewport;
++        if (previousViewport == null || previousViewport.X != vx || previousViewport.Y != vy ||
++            previousViewport.Width != vw || previousViewport.Height != vh ||
++            previousViewport.ScreenWidth != screenW || previousViewport.ScreenHeight != screenH)
++        {
++            System.Threading.Volatile.Write(ref _gameViewport, new GameViewport(vx, vy, vw, vh, screenW, screenH));
++            GameViewportChanged?.Invoke();
++        }
++
+         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+         gl.Viewport(0, 0, (uint)screenW, (uint)screenH);
+         gl.ClearColor(0f, 0f, 0f, 1f);
+@@ -625,6 +649,11 @@ public static class HostWindow
+         gl.ActiveTexture(TextureUnit.Texture0);
+         gl.BindTexture(TextureTarget.Texture2D, tex);
+         gl.Uniform1(_uDirectTex, 0);
++        float rows = Hle.GpuHle.LastDisplayH > 0 ? Hle.GpuHle.LastDisplayH : 240;
++        // Fade out below 2x vertical size to avoid aliasing or uniformly darkening small views.
++        float visibility = Math.Clamp(vh / rows - 1f, 0f, 1f);
++        gl.Uniform1(_uDirectScanlineStrength, Math.Clamp(ScanlineStrength, 0f, 1f) * visibility);
++        gl.Uniform1(_uDirectScanlineRows, rows);
+         gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+ 
+         gl.BindVertexArray(0);
