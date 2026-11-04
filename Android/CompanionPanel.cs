@@ -25,7 +25,9 @@ internal sealed class CompanionPanel : LinearLayout
     private enum PanelPage { Map, Equipment, Relics }
     private PanelPage _page;
     private bool _choosing;
-    private bool _seenMenuOpen;
+    private sealed record BrowseSelection(int Slot, int Id, string Name, bool Relic = false, bool WasActive = false);
+    private BrowseSelection? _selection;
+    private bool _changing;
     private string? _renderedInventory;
     private readonly Action _tick;
     private long _revision = -1;
@@ -68,10 +70,10 @@ internal sealed class CompanionPanel : LinearLayout
         var inventoryContent = new LinearLayout(context) { Orientation = Orientation.Vertical };
         _inventoryContent = inventoryContent;
         inventoryContent.Visibility = ViewStates.Gone;
-        var original = SotnCompanionSkin.Button(context, "Open Equipment");
+        var original = SotnCompanionSkin.Button(context, "Clear Selection");
         _original = original;
         original.Click += (_, _) => ResetSelection();
-        var resume = SotnCompanionSkin.Button(context, "Resume Game");
+        var resume = SotnCompanionSkin.Button(context, "Return to Map");
         resume.Click += (_, _) => ShowPage(PanelPage.Map);
         AddPair(inventoryContent, original, resume);
         _actionStatus = SotnCompanionSkin.Text(context, "", 12, true);
@@ -81,23 +83,16 @@ internal sealed class CompanionPanel : LinearLayout
         inventoryContent.AddView(_actionStatus);
         _confirm = SotnCompanionSkin.Button(context, "Confirm Equipment");
         _confirm.Enabled = false;
-        _confirm.Click += (_, _) => CompanionEquipment.Confirm();
-        var back = SotnCompanionSkin.Button(context, "Back");
-        back.Click += (_, _) =>
-        {
-            // Native Equip stays in its item picker after confirmation. Back must
-            // return to its overview before a second Back resumes gameplay.
-            bool originalPicker = _page == PanelPage.Equipment && CompanionState.Latest.MenuStep is 0x51 or 0x61 or 0x41;
-            if (_choosing || CompanionEquipment.Feedback.CanConfirm || originalPicker) ResetSelection();
-            else ShowPage(PanelPage.Map);
-        };
+        _confirm.Click += (_, _) => RequestChange();
+        var back = SotnCompanionSkin.Button(context, "Cancel Selection");
+        back.Click += (_, _) => ResetSelection();
         AddPair(inventoryContent, _confirm, back);
         _equipmentRows = new LinearLayout(context) { Orientation = Orientation.Vertical };
         _scroll.Visibility = ViewStates.Visible;
         _scroll.SetPadding(0, pad / 3, pad / 3, 0);
         _scroll.AddView(_equipmentRows);
         inventoryContent.AddView(_scroll, new LayoutParams(LayoutParams.MatchParent, 0, 1));
-        _description = SotnCompanionSkin.Text(context, "Select a slot or item to prepare equipment.\nConfirm while the original menu is paused.", 13);
+        _description = SotnCompanionSkin.Text(context, "Browse equipment while playing.\nOnly Equip opens the original menu and pauses.", 13);
         _description.SetMinLines(2);
         _description.SetPadding(pad, pad / 2, pad, pad / 2);
         _description.SetTextColor(SotnCompanionSkin.Muted);
@@ -133,28 +128,25 @@ internal sealed class CompanionPanel : LinearLayout
         _relicsTab.Selected = page == PanelPage.Relics;
         _mapContent.Visibility = page == PanelPage.Map ? ViewStates.Visible : ViewStates.Gone;
         _inventoryContent.Visibility = page == PanelPage.Map ? ViewStates.Gone : ViewStates.Visible;
-        if (page == PanelPage.Map)
-        {
-            _choosing = false;
-            _confirm.Enabled = false;
-            CompanionEquipment.Close();
-        }
-        else ResetSelection();
+        ResetSelection();
     }
 
     private void ResetSelection()
     {
         _choosing = false;
-        _seenMenuOpen = false;
+        _selection = null;
+        _changing = false;
         bool relics = _page == PanelPage.Relics;
-        _original.Text = relics ? "Open Relics" : "Open Equipment";
-        _confirm.Text = relics ? "Toggle Relic" : "Confirm Equipment";
+        _original.Text = "Clear Selection";
+        _confirm.Text = relics ? "Toggle Relic" : "Equip";
         _confirm.Enabled = false;
-        _description.Text = relics ? "Select a relic to review it in the original menu.\nToggle Relic changes its active state while paused."
-            : "Select a slot or item to prepare equipment.\nReview it above, then confirm while paused.";
+        _description.Text = relics ? "Browse relics while playing.\nOnly Enable Relic or Disable Relic opens the original menu."
+            : "Browse equipment while playing.\nOnly Equip opens the original menu and pauses.";
         RenderEquipment(CompanionState.Latest);
         _scroll.ScrollTo(0, 0);
-        if (relics) CompanionEquipment.OpenRelics(); else CompanionEquipment.OpenEquipment();
+        // This cancels only a pause owned by a lower-screen change. Merely
+        // switching tabs never opens a native menu or closes a manual pause.
+        CompanionEquipment.CancelChange();
     }
 
     protected override void OnAttachedToWindow()
@@ -168,6 +160,7 @@ internal sealed class CompanionPanel : LinearLayout
     {
         _attached = false;
         RemoveCallbacks(_tick);
+        if (_changing) CompanionEquipment.CancelChange();
         base.OnDetachedFromWindow();
     }
 
@@ -188,18 +181,68 @@ internal sealed class CompanionPanel : LinearLayout
             _map.Invalidate();
         }
         var feedback = CompanionEquipment.Feedback;
-        // A manual START/Back above must not leave a stale chooser below.
-        if (state.MenuOpen) _seenMenuOpen = true;
-        if (_page != PanelPage.Map && state.Playing && _seenMenuOpen && !feedback.Busy && !state.MenuOpen)
+        // Keep the current tab after a change, cancellation or manual START.
+        if (_changing && !feedback.Busy && !feedback.CanConfirm)
         {
-            _page = PanelPage.Map; _choosing = false;
-            _mapTab.Selected = true; _equipmentTab.Selected = _relicsTab.Selected = false;
-            _mapContent.Visibility = ViewStates.Visible; _inventoryContent.Visibility = ViewStates.Gone;
+            _changing = false; _selection = null;
+            _description.Text = feedback.Message;
+        }
+        if (!_changing && _selection != null && !SelectionAvailable(state))
+        {
+            _selection = null;
+            _description.Text = "Selection changed or is no longer available. Select it again.";
+        }
+        if ((!state.Playing || !state.Alucard) && _choosing)
+        {
+            _choosing = false;
+            RenderEquipment(state);
         }
         if (_actionStatus.Text != feedback.Message) _actionStatus.Text = feedback.Message;
-        _confirm.Enabled = feedback.CanConfirm && !feedback.Busy && state.Alucard && _page != PanelPage.Map;
-        _confirm.Selected = _confirm.Enabled;
+        UpdateActions(state);
         PostDelayed(_tick, 200);
+    }
+
+    private bool SelectionAvailable(CompanionSnapshot state)
+    {
+        if (!state.Playing || !state.Alucard || _selection is not { } selection) return false;
+        if (selection.Relic) return (state.Relics ?? []).Any(r => r.Id == selection.Id && r.Active == selection.WasActive);
+        return CompanionEquipment.Compatible(selection.Slot, selection.Id) &&
+            (selection.Id == CompanionEquipment.EmptyForSlot(selection.Slot) ||
+             (state.Items ?? []).Any(i => i.Hand == (selection.Slot < 2) && i.Id == selection.Id && i.BagCount > 0));
+    }
+
+    private void UpdateActions(CompanionSnapshot state)
+    {
+        var feedback = CompanionEquipment.Feedback;
+        bool relics = _page == PanelPage.Relics;
+        _original.Text = _changing ? "Cancel Change" : "Clear Selection";
+        _confirm.Text = _changing ? (relics ? "Confirm Toggle" : "Confirm Equipment")
+            : _selection is { Relic: true } r ? (r.WasActive ? "Disable Relic" : "Enable Relic")
+            : relics ? "Toggle Relic" : "Equip";
+        _confirm.Enabled = _page != PanelPage.Map && state.Alucard && !feedback.Busy &&
+            (_changing ? feedback.CanConfirm : !feedback.CanConfirm && SelectionAvailable(state));
+        _confirm.Selected = _confirm.Enabled;
+    }
+
+    private void Select(BrowseSelection selection)
+    {
+        _selection = selection;
+        _description.Text = selection.Relic
+            ? $"Selected: {selection.Name} · {(selection.WasActive ? "ON" : "OFF")}\nReview here freely; Enable/Disable pauses for confirmation."
+            : $"Selected: {selection.Name} · {SlotLabels[selection.Slot]}\nPress Equip to pause, review above and confirm or cancel.";
+        UpdateActions(CompanionState.Latest);
+    }
+
+    private void RequestChange()
+    {
+        if (_changing) { CompanionEquipment.Confirm(); return; }
+        if (!SelectionAvailable(CompanionState.Latest)) { ResetSelection(); return; }
+        if (CompanionEquipment.Feedback.Busy || CompanionEquipment.Feedback.CanConfirm) return;
+        var selection = _selection!;
+        _changing = true;
+        if (selection.Relic) CompanionEquipment.BeginRelicChange(selection.Id, selection.WasActive ? 1 : 0);
+        else CompanionEquipment.BeginChange(selection.Slot, selection.Id);
+        UpdateActions(CompanionState.Latest);
     }
 
     // Retail US menu labels slot0 as Right hand, despite the wrapper enum's name.
@@ -217,9 +260,8 @@ internal sealed class CompanionPanel : LinearLayout
                 button.SetMinHeight(SotnCompanionSkin.Dp(Context, 64));
                 button.Click += (_, _) =>
                 {
-                    if (CompanionEquipment.Feedback.Busy) return;
-                    _description.Text = $"Selected: {relic.Name}\nReview above; Toggle Relic applies the change.";
-                    CompanionEquipment.SelectRelic(relic.Id);
+                    if (_changing || CompanionEquipment.Feedback.Busy) return;
+                    Select(new(-1, relic.Id, relic.Name, Relic: true, WasActive: relic.Active));
                 };
                 buttons.Add(button);
             }
@@ -313,24 +355,23 @@ internal sealed class CompanionPanel : LinearLayout
     }
     private void ChooseForSlot(int slot)
     {
-        if (CompanionEquipment.Feedback.Busy) return;
+        if (_changing || CompanionEquipment.Feedback.Busy) return;
         var state = CompanionState.Latest;
         if (!state.Alucard) return;
-        _description.Text = $"{SlotLabels[slot]} · select an item.\nReview the description and ATK/DEF in the original menu.";
-        CompanionEquipment.OpenEquipment();
+        _description.Text = $"{SlotLabels[slot]} · select an item.\nBrowsing does not pause the game.";
         var choices = (state.Items ?? []).Where(i => i.BagCount > 0 && i.Hand == (slot < 2) && CompanionEquipment.Compatible(slot, i.Id)).ToArray();
         var names = new[] { "Unequip this slot" }.Concat(choices.Select(i => $"{i.Name} ×{i.BagCount}")).ToArray();
-        ShowChoices(SlotLabels[slot], names, index => CompanionEquipment.Prepare(slot,
-            index == 0 ? CompanionEquipment.EmptyForSlot(slot) : choices[index - 1].Id));
+        ShowChoices(SlotLabels[slot], names, index => Select(new(slot,
+            index == 0 ? CompanionEquipment.EmptyForSlot(slot) : choices[index - 1].Id,
+            index == 0 ? "Unequip this slot" : choices[index - 1].Name)));
     }
     private void ChooseSlot(CompanionItem item)
     {
-        if (CompanionEquipment.Feedback.Busy) return;
-        _description.Text = $"{item.Name} · In inventory: {item.BagCount}\nPrepare equipment and confirm while the original menu is paused.";
+        if (_changing || CompanionEquipment.Feedback.Busy) return;
+        _description.Text = $"{item.Name} · In inventory: {item.BagCount}\nChoose a slot. Browsing does not pause the game.";
         int[] slots = Enumerable.Range(0, 7).Where(s => (s < 2) == item.Hand && CompanionEquipment.Compatible(s, item.Id)).ToArray();
-        if (slots.Length == 1) { CompanionEquipment.Prepare(slots[0], item.Id); return; }
-        CompanionEquipment.OpenEquipment();
-        ShowChoices($"Prepare {item.Name}", slots.Select(s => SlotLabels[s]).ToArray(), index => CompanionEquipment.Prepare(slots[index], item.Id));
+        if (slots.Length == 1) { Select(new(slots[0], item.Id, item.Name)); return; }
+        ShowChoices($"Select slot for {item.Name}", slots.Select(s => SlotLabels[s]).ToArray(), index => Select(new(slots[index], item.Id, item.Name)));
     }
     private void ShowChoices(string title, string[] names, Action<int> choose)
     {

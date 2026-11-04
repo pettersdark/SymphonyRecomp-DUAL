@@ -34,14 +34,28 @@ statements in preserved upstream files describe the original upstream work.
 - A companion panel with **MAP**, **EQUIPMENT** and **RELICS** tabs.
 - Explored map cells and the current player position.
 - Current equipment, carried items and obtained relics from the running game.
-- EQUIPMENT and RELICS also open the original menu on the main screen and pause
-  gameplay. Changes use the game's menu with explicit **Confirm Equipment** or
-  **Toggle Relic** actions. **MAP** or **Resume Game** returns to gameplay.
+- EQUIPMENT, inventory choices and RELICS can be browsed while gameplay continues.
+  Select a slot/item or relic below; only **Equip**, **Enable Relic** or **Disable Relic**
+  opens the original menu and pauses for review. **Confirm Equipment** or **Confirm Toggle**
+  lets the game apply the change; confirmation or cancellation closes that pause
+  automatically and keeps the current lower-screen tab. A pause you opened manually
+  with START stays under your control.
 - English companion menus, a compact castle/level/HP header and decorative borders.
 - Android file-picker save-state import/export, validation and a backup before
   replacing an existing slot.
 
-Version: `0.10.1-console-test`, Android version code `20`.
+Version: `0.21-live-browse`, Android version code `21`.
+
+## Downloads and installation guides
+
+**[Download version 0.21](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/tag/v0.21)**
+
+- [ARM64 APK for Android handhelds](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-arm64.apk)
+- [English installation guide](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-EN.pdf)
+- [Guía de instalación en español](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-ES.pdf)
+
+The installation ZIP includes both Android architectures, both illustrated guides
+and quick instructions for a fresh installation. Supply your own USA CUE/BIN disc.
 
 ## Fresh installation
 

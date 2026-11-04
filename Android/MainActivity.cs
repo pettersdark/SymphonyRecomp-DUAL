@@ -199,7 +199,9 @@ namespace RecompOne.SoTN.Android
 
         protected override void OnPause()
         {
-            CompanionEquipment.CancelPending();
+            // Cancel and close a lower-screen-owned pause when presentation is
+            // suspended. Save-state loading still uses the hard reset instead.
+            CompanionEquipment.CancelChange();
             _companionDisplays?.Stop();
             base.OnPause();
             Console.WriteLine("[Android] MainActivity OnPause - pausing audio and resetting controls.");

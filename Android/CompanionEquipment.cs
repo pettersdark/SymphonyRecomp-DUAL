@@ -12,15 +12,21 @@ internal sealed record EquipmentFeedback(string Message, bool Busy = false, bool
 // at the game's VSync boundary. Equipment/counts/stats are NEVER written by this bridge.
 internal static class CompanionEquipment
 {
-    private enum Command { Open, OpenEquipment, OpenRelics, Prepare, SelectRelic, Confirm, Back, Close }
-    private sealed record Request(Command Command, int Slot = -1, int Id = -1);
+    private enum Command { Open, OpenEquipment, OpenRelics, Prepare, SelectRelic, Confirm, Back, Close, CancelChange }
+    private sealed record Request(Command Command, int Slot = -1, int Id = -1, bool AutoResume = false, int ExpectedRelicState = -1);
     private static readonly object Gate = new();
     private static Request? _pending, _active, _candidate;
     private static bool _cancel;
     private static int _cooldown, _frames, _verify;
     private static bool _exitSent, _relicWasActive;
+    // Only close a pause opened by a lower-screen change. A menu the player
+    // opened with START belongs to the player and must remain paused.
+    private static bool _autoResume, _openedMenu, _sawMenuOpen, _closing;
+    private static int _closeAttempts, _closeWait;
+    private static string? _completion;
+    private static volatile bool _confirmationSent;
     private static long _started;
-    private static EquipmentFeedback _feedback = new("Select a slot or item to open the original equipment menu.");
+    private static EquipmentFeedback _feedback = new("Browse freely. Only Equip or Enable/Disable Relic pauses the game.");
     public static EquipmentFeedback Feedback => Volatile.Read(ref _feedback);
     public const uint MenuStepAddress = 0x800978F8;
     private const uint MappingAddress = 0x801375D8;
@@ -32,6 +38,10 @@ internal static class CompanionEquipment
     public static void OpenRelics() => Enqueue(new(Command.OpenRelics));
     public static void SelectRelic(int id) => Enqueue(new(Command.SelectRelic, Id: id));
     public static void Prepare(int slot, int id) => Enqueue(new(Command.Prepare, slot, id));
+    public static void BeginChange(int slot, int id) => Enqueue(new(Command.Prepare, slot, id, AutoResume: true));
+    public static void BeginRelicChange(int id, int expectedActive) =>
+        Enqueue(new(Command.SelectRelic, Id: id, AutoResume: true, ExpectedRelicState: expectedActive));
+    public static void CancelChange() => Enqueue(new(Command.CancelChange));
     public static void Confirm() => Enqueue(new(Command.Confirm));
     public static void Back() => Enqueue(new(Command.Back));
     public static void Close() => Enqueue(new(Command.Close));
@@ -43,8 +53,12 @@ internal static class CompanionEquipment
             // A tab, Back or Resume replaces navigation already in progress. Never
             // leave a previous candidate confirmable while changing the upper menu.
             if (request.Command == Command.Confirm && (Feedback.Busy || !Feedback.CanConfirm)) return;
+            // After the native confirm edge, cancellation cannot undo the game.
+            // Finish verification and close the owned pause instead.
+            if (request.Command == Command.CancelChange && _confirmationSent) return;
+            if (request.AutoResume && (Feedback.Busy || Feedback.CanConfirm)) return;
             _pending = request;
-            Say("Opening original menu…", busy: true);
+            Say(request.Command == Command.CancelChange ? "Clearing selection…" : "Opening original menu…", busy: true);
         }
     }
     private static void Say(string text, bool busy = false, bool confirm = false) =>
@@ -52,10 +66,29 @@ internal static class CompanionEquipment
     private static void Release() { Controller.MenuInput = 0xFFFF; Controller.MenuOwnsInput = false; }
     private static void Finish(string message, bool ready = false)
     {
+        if (!ready && _autoResume && _openedMenu && !_closing && ValidGame())
+        {
+            _completion = message;
+            _candidate = null;
+            _active = new(Command.Close);
+            _closing = true;
+            _exitSent = false;
+            _closeAttempts = _closeWait = _frames = _cooldown = _verify = 0;
+            _started = Stopwatch.GetTimestamp();
+            Release();
+            Say("Closing the original menu and resuming…", busy: true);
+            return;
+        }
         lock (Gate) _active = null;
         _cooldown = _verify = 0;
         Release();
-        if (!ready) _candidate = null;
+        if (!ready)
+        {
+            _candidate = null;
+            _autoResume = _openedMenu = _sawMenuOpen = _closing = false;
+            _completion = null;
+            _confirmationSent = false;
+        }
         Say(message, confirm: ready);
         Console.WriteLine($"[TouchEquip] {message}");
     }
@@ -83,7 +116,9 @@ internal static class CompanionEquipment
         (r.Id == EmptyForSlot(r.Slot) || (r.Slot < 2 ? Inventory.GetHandCount(r.Id) : Inventory.GetBodyCount(r.Id)) > 0);
     private static bool RelicAvailable(int id) => (uint)id < Inventory.RelicCount && id is not (23 or 24) &&
         (Inventory.GetRelic(id) & 1) != 0;
-    private static bool CandidateAvailable(Request r) => r.Command == Command.SelectRelic ? RelicAvailable(r.Id) : Available(r);
+    private static bool CandidateAvailable(Request r) => r.Command == Command.SelectRelic
+        ? RelicAvailable(r.Id) && (r.ExpectedRelicState < 0 || Inventory.IsRelicActive(r.Id) == (r.ExpectedRelicState != 0))
+        : Available(r);
     private static bool ValidGame()
     {
         var m = RecompOne.Runtime.Runtime.Mem;
@@ -133,12 +168,25 @@ internal static class CompanionEquipment
         Request? request;
         lock (Gate)
         {
-            if (_cancel) { _cancel = false; _active = _candidate = null; _cooldown = _verify = 0; Release(); Say("Touch selection cleared."); }
+            if (_cancel)
+            {
+                _cancel = false; _active = _candidate = null; _cooldown = _verify = 0;
+                _autoResume = _openedMenu = _sawMenuOpen = _closing = false; _completion = null;
+                _confirmationSent = false;
+                Release(); Say("Touch selection cleared.");
+            }
             request = _pending;
             _pending = null;
             if (request != null)
             {
                 _active = request; _frames = _cooldown = _verify = 0; _exitSent = false;
+                if (request.Command is not (Command.Confirm or Command.CancelChange))
+                {
+                    _autoResume = request.AutoResume;
+                    _openedMenu = _sawMenuOpen = _closing = false;
+                    _completion = null;
+                    _confirmationSent = false;
+                }
                 _started = Stopwatch.GetTimestamp();
                 Release();
             }
@@ -146,10 +194,11 @@ internal static class CompanionEquipment
         if (_active == null)
         {
             if (_candidate != null && (!ValidGame() || !CandidateAvailable(_candidate) || !SelectionMatches(_candidate)))
-            { _candidate = null; Say("Selection changed in the original menu."); }
+                Finish("Selection changed in the original menu.");
             return;
         }
         if (!ValidGame()) { Finish("Available when Alucard can open his menu."); return; }
+        if (_openedMenu && Game.MenuOpen) _sawMenuOpen = true;
         if (Stopwatch.GetTimestamp() - _started > Stopwatch.Frequency * 12 || ++_frames > 900)
         { Finish("Menu unavailable. Wait for gameplay, then try again or press START."); return; }
         if (_cooldown > 0)
@@ -159,13 +208,21 @@ internal static class CompanionEquipment
         }
         var r = _active;
         var m = RecompOne.Runtime.Runtime.Mem!;
+        if (r.Command == Command.CancelChange)
+        {
+            if (_closing) { _active = new(Command.Close); return; }
+            Finish(Game.MenuOpen && !_openedMenu ? "Selection cleared. Your manual pause is unchanged."
+                : "Selection cancelled. Browsing without pausing.");
+            return;
+        }
         if (_verify > 0)
         {
             if (++_verify < 5) return;
             bool equipped = _candidate != null && (_candidate.Command == Command.SelectRelic
                 ? Inventory.IsRelicActive(_candidate.Id) != _relicWasActive
                 : Inventory.GetWornEquipment(_candidate.Slot) == _candidate.Id);
-            Finish(equipped ? "Change applied by the game. Still paused." : "The game did not allow that change. Check the original menu.");
+            Finish(equipped ? (_autoResume ? "Change applied by the game." : "Change applied by the game. Still paused.")
+                : "The game did not allow that change.");
             return;
         }
         if (r.Command == Command.Confirm)
@@ -174,30 +231,53 @@ internal static class CompanionEquipment
             { Finish("Selection changed. Select the item again."); return; }
             Say("Confirming in the original menu…", busy: true);
             if (_candidate.Command == Command.SelectRelic) _relicWasActive = Inventory.IsRelicActive(_candidate.Id);
+            _confirmationSent = true;
             Pulse(Controller.Cross); _verify = 1;
             return;
         }
         _candidate = null;
         if (r.Command is Command.Back or Command.Close)
         {
-            if (!Game.MenuOpen) { Finish("Game resumed."); return; }
+            if (!Game.MenuOpen)
+            {
+                // Cancellation may overtake the opening animation. Never leave
+                // a late-opening native menu stranded after clearing the request.
+                if (_closing && !_sawMenuOpen && ++_closeWait < 30) return;
+                Finish(_completion ?? "Game resumed."); return;
+            }
             if (Step < Root) return; // wait for the native opening/closing animation
             if (_exitSent)
             {
                 if (r.Command == Command.Back) Finish("Original menu ready. Game paused.");
+                else if (_closing && ++_closeWait >= 30)
+                {
+                    if (_closeAttempts >= 3) Finish("Press START to close the original menu.");
+                    else { _exitSent = false; _closeWait = 0; }
+                }
                 return;
             }
             Pulse(r.Command == Command.Close ? Controller.Start : Controller.Triangle);
             _exitSent = true;
+            _closeAttempts++;
             Say(r.Command == Command.Close ? "Resuming game…" : "Going back…", true);
             return;
         }
+        // Reject stale or unavailable lower-screen requests before opening a pause.
+        if (_autoResume && !CandidateAvailable(r)) { Finish("Selection unavailable. Choose it again."); return; }
+        if (_autoResume && r.Command == Command.Prepare && Inventory.GetWornEquipment(r.Slot) == r.Id)
+        { Finish("That item is already equipped."); return; }
         if (!Game.MenuOpen)
         {
+            if (_autoResume && _openedMenu) return; // one opening edge, even with a slow native fade
             if (m.ReadU32(0x8003C704) != 0 || m.ReadU32(0x8003C8B8) == 0)
-            { Say("Waiting for the scene or menu transition…", true); return; }
+            {
+                if (_autoResume) Finish("Changes are unavailable during this scene. Try again during gameplay.");
+                else Say("Waiting for the scene or menu transition…", true);
+                return;
+            }
             Say("Opening the original menu…", true);
             Pulse(Controller.Start);
+            if (_autoResume) _openedMenu = true;
             return;
         }
         int step = Step;
@@ -219,7 +299,8 @@ internal static class CompanionEquipment
             if (cursor == wanted)
             {
                 _candidate = r;
-                Finish("Review the relic above, then select Toggle Relic. Game paused.", ready: true);
+                Finish(_autoResume ? "Review the relic above, then Confirm Toggle or Cancel Change. Game paused."
+                    : "Review the relic above, then select Toggle Relic. Game paused.", ready: true);
             }
             else
             {
