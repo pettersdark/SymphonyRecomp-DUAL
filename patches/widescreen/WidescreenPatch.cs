@@ -74,6 +74,11 @@ public static partial class WidescreenPatch
     public static void Register()
     {
         Event.AddListener<DisplayModeEvent>(OnDisplayMode);
+        // Native state may change after its display-buffer hook (including a
+        // restored state). Re-evaluate at presentation so fill follows gameplay
+        // automatically, and resets for native map/menu transitions.
+        RecompOne.Runtime.Runtime.OnBeforePresentFrame -= Refresh;
+        RecompOne.Runtime.Runtime.OnBeforePresentFrame += Refresh;
         RegisterEffectPrims();
     }
 
@@ -86,7 +91,20 @@ public static partial class WidescreenPatch
         EnsureInitialized();
         StageAspect = Display.TargetAspect;
         bool stage = mode == DisplayMode.Stage;
-        Display.SourceAspect = stage ? SourceAspect : 4f / 3f;
+        var aspectMode = RecompOne.Runtime.Host.HostWindow.CurrentAspectRatio;
+        var memory = RecompOne.Runtime.Runtime.Mem;
+        // File selection also uses the Stage display-buffer hook. Check native
+        // gameplay state so its menus (and the in-game map) are never cropped.
+        bool gameplay = stage && memory != null && memory.ReadU32(0x8003C734) == 2 &&
+            memory.ReadU32(0x800973EC) == 0 && memory.ReadU16(0x800974A4) == 0;
+        bool fill = gameplay && PillarBoxing &&
+            (aspectMode == RecompOne.Runtime.Host.HostWindow.AspectRatioMode.Original_4_3 ||
+             aspectMode == RecompOne.Runtime.Host.HostWindow.AspectRatioMode.Widescreen_16_9);
+        GpuHle.PresentCropTop = fill ? 20 : 0;
+        GpuHle.PresentCropBottom = fill ? 13 : 0;
+        // 4:3 retains the complete active image. Widescreen renders extra level
+        // for the active height, so cropping never becomes a horizontal stretch.
+        Display.SourceAspect = stage ? SourceAspect * (fill && !OriginalAspect ? 240f / 207f : 1f) : 4f / 3f;
         Display.OutputAspect = 4f / 3f;
         Display.WideAspect = stage && !OriginalAspect ? StageAspect : 0f;
     }

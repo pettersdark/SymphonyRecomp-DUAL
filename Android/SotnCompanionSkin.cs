@@ -10,16 +10,16 @@ namespace RecompOne.SoTN.Android;
 
 internal static class SotnCompanionSkin
 {
-    public static readonly Color Ink = Color.Rgb(4, 8, 24);
-    public static readonly Color Silver = Color.Rgb(194, 205, 225);
+    public static readonly Color Ink = Color.Rgb(3, 7, 34);
+    public static readonly Color Silver = Color.Rgb(213, 221, 240);
     public static readonly Color White = Color.Rgb(247, 244, 233);
     public static readonly Color Gold = Color.Rgb(223, 194, 129);
-    public static readonly Color Muted = Color.Rgb(153, 170, 199);
+    public static readonly Color Muted = Color.Rgb(172, 189, 227);
     public static int Dp(Context context, float value) => (int)(value * (context.Resources?.DisplayMetrics?.Density ?? 1));
 
     public static TextView Text(Context context, string text, float size = 15, bool gold = false)
     {
-        var view = new TextView(context) { Text = text, TextSize = size, Typeface = Typeface.Monospace };
+        var view = new TextView(context) { Text = text, TextSize = size, Typeface = Typeface.Create("serif", TypefaceStyle.Bold) };
         view.SetTextColor(gold ? Gold : White);
         view.SetShadowLayer(Dp(context, 1), Dp(context, 1), Dp(context, 1), Color.Black);
         return view;
@@ -27,9 +27,10 @@ internal static class SotnCompanionSkin
 
     public static TextView Heading(Context context, string text)
     {
-        var view = Text(context, text, 12, true);
-        view.SetPadding(Dp(context, 3), Dp(context, 11), 0, Dp(context, 7));
-        view.Typeface = Typeface.Create(Typeface.Monospace, TypefaceStyle.Bold);
+        var view = Text(context, text, 13, true);
+        view.Background = Frame(context, SotnSurface.Heading);
+        view.SetPadding(Dp(context, 12), Dp(context, 7), Dp(context, 8), Dp(context, 7));
+        view.Typeface = Typeface.Create("serif", TypefaceStyle.Bold);
         view.LetterSpacing = .06f;
         return view;
     }
@@ -39,7 +40,7 @@ internal static class SotnCompanionSkin
 
     public static Button Button(Context context, string text, SotnSurface surface = SotnSurface.Control)
     {
-        var button = new Button(context) { Text = text, TextSize = 13, Typeface = Typeface.Monospace,
+        var button = new Button(context) { Text = text, TextSize = 15, Typeface = Typeface.Create("serif", TypefaceStyle.Bold),
             Gravity = GravityFlags.CenterVertical | GravityFlags.Left, Elevation = 0 };
         button.SetAllCaps(false);
         button.BackgroundTintList = null;
@@ -48,7 +49,7 @@ internal static class SotnCompanionSkin
         button.SetMinimumHeight(Dp(context, 42));
         button.SetMinWidth(0);
         button.SetMinimumWidth(0);
-        button.SetPadding(Dp(context, 12), Dp(context, 5), Dp(context, 12), Dp(context, 5));
+        button.SetPadding(Dp(context, 16), Dp(context, 6), Dp(context, 12), Dp(context, 6));
         button.SetShadowLayer(Dp(context, 1), Dp(context, 1), Dp(context, 1), Color.Black);
         var states = new StateListDrawable();
         states.AddState([-global::Android.Resource.Attribute.StateEnabled], Frame(context, surface, disabled: true));
@@ -64,9 +65,9 @@ internal static class SotnCompanionSkin
     }
 }
 
-internal enum SotnSurface { Panel, Control, Tab, Item, Inset }
+internal enum SotnSurface { Panel, Control, Tab, Item, Inset, Heading }
 
-// Quiet navy surfaces and square beveled frames, drawn at the display's density.
+// Cobalt panels, silver bevels and a gold cursor echo the native equipment menu.
 // No bitmap backgrounds, animation timers, or changes to the game's renderer.
 internal sealed class SotnFrameDrawable(SotnSurface surface, bool selected, bool disabled, float density) : Drawable
 {
@@ -76,11 +77,11 @@ internal sealed class SotnFrameDrawable(SotnSurface surface, bool selected, bool
     {
         base.OnBoundsChange(bounds);
         _gradient?.Dispose();
-        var top = surface == SotnSurface.Panel ? Color.Rgb(17, 30, 75) :
-            surface == SotnSurface.Inset ? InkColor : Color.Rgb(18, 34, 79);
-        var bottom = surface == SotnSurface.Panel ? Color.Rgb(6, 13, 38) : Color.Rgb(7, 16, 45);
+        var top = surface == SotnSurface.Panel ? Color.Rgb(19, 30, 121) :
+            surface == SotnSurface.Inset ? InkColor : Color.Rgb(19, 34, 126);
+        var bottom = surface == SotnSurface.Panel ? Color.Rgb(5, 10, 64) : Color.Rgb(8, 16, 83);
         if (disabled) { top = Color.Rgb(12, 21, 44); bottom = Color.Rgb(8, 14, 33); }
-        if (selected) { top = Color.Rgb(116, 31, 51); bottom = Color.Rgb(50, 12, 30); }
+        if (selected) { top = Color.Rgb(39, 67, 174); bottom = Color.Rgb(15, 30, 107); }
         _gradient = new LinearGradient(0, bounds.Top, 0, Math.Max(bounds.Top + 1, bounds.Bottom), top, bottom, Shader.TileMode.Clamp!);
     }
     private static Color InkColor => SotnCompanionSkin.Ink;
@@ -105,7 +106,7 @@ internal sealed class SotnFrameDrawable(SotnSurface surface, bool selected, bool
         _paint.Color = Color.Black;
         canvas.DrawRect(b.Left + .5f * d, b.Top + .5f * d, b.Right - .5f * d, b.Bottom - .5f * d, _paint);
         _paint.Color = selected ? SotnCompanionSkin.Gold :
-            surface == SotnSurface.Panel ? SotnCompanionSkin.Silver : Color.Rgb(65, 83, 126);
+            surface == SotnSurface.Item ? Color.Rgb(93, 113, 175) : SotnCompanionSkin.Silver;
         if (disabled) _paint.Color = Color.Rgb(39, 51, 77);
         canvas.DrawRect(b.Left + 1.5f * d, b.Top + 1.5f * d, b.Right - 1.5f * d, b.Bottom - 1.5f * d, _paint);
         _paint.Color = disabled ? Color.Rgb(27, 38, 60) : Color.Argb(100, 154, 178, 219);
@@ -123,6 +124,20 @@ internal sealed class SotnFrameDrawable(SotnSurface surface, bool selected, bool
                     canvas.DrawLine(x, y, x + sx * 11 * d, y, _paint);
                     canvas.DrawLine(x, y, x, y + sy * 11 * d, _paint);
                 }
+        }
+        if (surface == SotnSurface.Heading)
+        {
+            _paint.Color = SotnCompanionSkin.Gold;
+            canvas.DrawLine(b.Left + 8 * d, b.Bottom - 2 * d, b.Right - 8 * d, b.Bottom - 2 * d, _paint);
+        }
+        if (selected)
+        {
+            _paint.SetStyle(Paint.Style.Fill);
+            _paint.Color = SotnCompanionSkin.Gold;
+            float x = b.Left + 7 * d, y = b.ExactCenterY();
+            canvas.DrawRect(x, y - 3 * d, x + 2 * d, y + 3 * d, _paint);
+            canvas.DrawRect(x + 2 * d, y - 2 * d, x + 4 * d, y + 2 * d, _paint);
+            canvas.DrawRect(x + 4 * d, y - d, x + 5 * d, y + d, _paint);
         }
         if (surface == SotnSurface.Tab && selected)
         {

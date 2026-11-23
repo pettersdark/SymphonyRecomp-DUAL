@@ -1,3 +1,43 @@
+diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+index 90cbfd4..a6986f5 100644
+--- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
++++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+@@ -796,7 +796,9 @@ public sealed class GlCore : IGpuBackend
+         if (rgb24) src = null;
+ 
+         int w1x = src != null ? w + src.Margin * 2 : w;
+-        int h1x = h;
++        int cropTop = !rgb24 && src != null && h == 240 ? Math.Clamp(GpuHle.PresentCropTop, 0, h - 1) : 0;
++        int cropBottom = !rgb24 && src != null && h == 240 ? Math.Clamp(GpuHle.PresentCropBottom, 0, h - cropTop - 1) : 0;
++        int h1x = h - cropTop - cropBottom;
+         float aspect = src is { Margin: > 0 } ? GpuHle.WideAspect : src != null ? GpuHle.SourceAspect : GpuHle.OutputAspect;
+ 
+ 
+@@ -831,8 +833,8 @@ public sealed class GlCore : IGpuBackend
+         }
+         else if (src != null)
+         {
+-            _gl.Uniform2(_uPresentOrigin, 0f, 0f);
+-            _gl.Uniform2(_uPresentSize, (float)src.Wide1x, src.H);
++            _gl.Uniform2(_uPresentOrigin, 0f, (float)cropTop);
++            _gl.Uniform2(_uPresentSize, (float)src.Wide1x, src.H - cropTop - cropBottom);
+             _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
+         }
+         else
+diff --git a/RecompOne.Runtime/Gpu/Hle/GpuHle.cs b/RecompOne.Runtime/Gpu/Hle/GpuHle.cs
+index 82682b0..c3ab8b3 100644
+--- a/RecompOne.Runtime/Gpu/Hle/GpuHle.cs
++++ b/RecompOne.Runtime/Gpu/Hle/GpuHle.cs
+@@ -9,6 +9,9 @@ public static class GpuHle
+     public static float OutputAspect { get; set; } = 4f / 3f;
+ 
+     public static float SourceAspect { get; set; } = 4f / 3f;
++    // Scanlines excluded at presentation only; game coordinates stay intact.
++    public static int PresentCropTop { get; set; }
++    public static int PresentCropBottom { get; set; }
+     public static int LastDisplayW { get; set; }
+     public static int LastDisplayH { get; set; }
+     public static float TargetAspect { get; set; } = 4f / 3f;
 diff --git a/RecompOne.Runtime/Hardware/Controller.cs b/RecompOne.Runtime/Hardware/Controller.cs
 index dbe6c57..3f251e1 100644
 --- a/RecompOne.Runtime/Hardware/Controller.cs

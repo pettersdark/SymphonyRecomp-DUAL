@@ -40,12 +40,13 @@ internal sealed class CompanionPanel : LinearLayout
         int pad = (int)(12 * (Resources?.DisplayMetrics?.Density ?? 1));
         SetPadding(pad, pad, pad, pad);
         _status = SotnCompanionSkin.Text(context, "", 12);
-        _status.SetTextColor(SotnCompanionSkin.Muted);
+        _status.SetTextColor(SotnCompanionSkin.White);
+        _status.Background = SotnCompanionSkin.Frame(context, SotnSurface.Inset);
         _status.SetSingleLine(true);
         _status.Ellipsize = TextUtils.TruncateAt.End;
-        _status.SetPadding(0, pad / 3, 0, pad / 2);
+        _status.SetPadding(pad, pad / 2, pad, pad / 2);
         _status.Gravity = GravityFlags.Center;
-        AddView(_status);
+        AddView(_status, new LayoutParams(LayoutParams.MatchParent, LayoutParams.WrapContent) { BottomMargin = pad / 2 });
         var tabs = new LinearLayout(context) { Orientation = Orientation.Horizontal };
         var mapTab = SotnCompanionSkin.Button(context, "MAP", SotnSurface.Tab);
         var inventoryTab = SotnCompanionSkin.Button(context, "EQUIPMENT", SotnSurface.Tab);
@@ -54,8 +55,8 @@ internal sealed class CompanionPanel : LinearLayout
         foreach (var tab in new[] { mapTab, inventoryTab, relicsTab })
         {
             tab.Gravity = GravityFlags.Center;
-            tab.LetterSpacing = .1f;
-            tab.Typeface = Typeface.Create(Typeface.Monospace, TypefaceStyle.Bold);
+            tab.LetterSpacing = .035f;
+            tab.Typeface = Typeface.Create("serif", TypefaceStyle.Bold);
         }
         mapTab.Selected = true;
         tabs.AddView(mapTab, new LayoutParams(0, LayoutParams.WrapContent, 1) { RightMargin = pad / 4 });
@@ -279,6 +280,7 @@ internal sealed class CompanionPanel : LinearLayout
             int slot = i, id = state.Equipment[i];
             string name = slot < 2 ? CompanionState.Name<HandItem>(id) : CompanionState.Name<BodyItem>(id);
             var button = ItemButton($"{SlotLabels[slot]}\n{name}", slot < 2, id);
+            button.Selected = _selection is { Relic: false } selected && selected.Slot == slot;
             button.Click += (_, _) => ChooseForSlot(slot);
             equipmentButtons.Add(button);
         }
@@ -290,6 +292,7 @@ internal sealed class CompanionPanel : LinearLayout
         {
             if (item.BagCount <= 0) continue;
             var button = ItemButton($"{item.Name}  ×{item.BagCount}", item.Hand, item.Id);
+            button.Selected = _selection is { Relic: false } selectedItem && selectedItem.Id == item.Id && (selectedItem.Slot < 2) == item.Hand;
             button.Click += (_, _) => ChooseSlot(item);
             bagButtons.Add(button);
         }
@@ -434,10 +437,10 @@ internal sealed class ExplorationView(Context context) : View(context)
             for (int x = 0; x < 64; x++)
             {
                 if (!CastleExploration.IsVisited(s.Exploration, s.Castle, x, y)) continue;
-                _paint.Color = Color.Rgb(41, 79, 164);
+                _paint.Color = Color.Rgb(32, 56, 148);
                 canvas.DrawRect(left + x * size, top + y * size,
                     left + (x + 1) * size, top + (y + 1) * size, _paint);
-                _paint.Color = Color.Rgb(153, 185, 240);
+                _paint.Color = Color.Rgb(173, 194, 249);
                 _paint.StrokeWidth = 1;
                 float l = left + x * size, t = top + y * size;
                 if (!CastleExploration.IsVisited(s.Exploration, s.Castle, x - 1, y)) canvas.DrawLine(l, t, l, t + size, _paint);

@@ -40,22 +40,32 @@ statements in preserved upstream files describe the original upstream work.
   lets the game apply the change; confirmation or cancellation closes that pause
   automatically and keeps the current lower-screen tab. A pause you opened manually
   with START stays under your control.
-- English companion menus, a compact castle/level/HP header and decorative borders.
+- English companion menus with cobalt panels, silver frames, serif typography,
+  gold headings and a selection cursor, plus a compact castle/level/HP header.
+- 4:3 gameplay fills the active height while retaining both sides of the picture.
+- 16:9 renders additional stage content and recalculates the field of view for
+  the active height; it does not stretch a finished 4:3 picture sideways.
+- Native menus, the original map, file selection and FMV retain their framing;
+  FMV keeps its original aspect ratio. Framing updates automatically after loading
+  and when switching between gameplay and native menus.
+- Decorative borders remain configurable from the display menu.
 - Android file-picker save-state import/export, validation and a backup before
   replacing an existing slot.
 
-Version: `0.21-live-browse`, Android version code `21`.
+Version: `0.22-framing-menu`, Android version code `22`.
 
 ## Downloads and installation guides
 
-**[Download version 0.21](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/tag/v0.21)**
+**[Download version 0.22](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/tag/v0.22)**
 
-- [ARM64 APK for Android handhelds](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-arm64.apk)
-- [English installation guide](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-EN.pdf)
-- [Guía de instalación en español](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-ES.pdf)
+- [ARM64 APK for Android handhelds](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.22/SymphonyRecomp-DUAL-0.22-arm64.apk)
+- [English illustrated installation guide (0.21 edition)](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-EN.pdf)
+- [Guía ilustrada en español (edición 0.21)](https://github.com/pettersdark/SymphonyRecomp-DUAL/releases/download/v0.21/SymphonyRecomp-DUAL-0.21-Installation-ES.pdf)
 
-The installation ZIP includes both Android architectures, both illustrated guides
-and quick instructions for a fresh installation. Supply your own USA CUE/BIN disc.
+The 0.22 installation ZIP includes both Android architectures and bilingual
+quick instructions for a fresh installation. The illustrated 0.21 guides remain
+linked above; their installation steps still apply. See the 0.22 release notes
+for the new framing behavior and menu appearance. Supply your own USA CUE/BIN disc.
 
 ## Fresh installation
 
@@ -71,8 +81,10 @@ Enable the lower screen in the handheld firmware, then use:
 
 **MENU → Display → Second screen → Map, equipment and relics → On**
 
-The status should show **Connected**. Use **Aspect ratio → 4:3 original** for the
-original proportions. Choose borders under **Display → Decorative borders**.
+The status should show **Connected**. Choose **Aspect ratio → 4:3 original**
+to retain the complete active picture inside a 4:3 area, or **16:9 widescreen**
+for an extended stage view. Gameplay fills the active height in both modes.
+Choose borders under **Display → Decorative borders**.
 
 ## Build from source
 
@@ -108,6 +120,13 @@ Build one architecture at a time. For an x64 Android emulator, replace
 own signing key as required by .NET Android.
 
 ## Validation and limitations
+
+The 0.22 native equipment menu was checked from a fresh installation and
+**New Game**, with no state loads: names, icons, statistics and item descriptions
+rendered correctly in both aspect selections. Earlier incomplete-menu reports
+came from a test setup using a different old disc and incomplete graphics output;
+the clean check required no APK change. See [0.22 validation](docs/VALIDATION-0.22.md).
+
 
 The x64 app has been exercised in an Android emulator with a separate virtual
 display, including map updates, equipment/relic navigation and file-picker
